@@ -168,24 +168,24 @@ def get_file_content(file_path: str, use_tqdm: bool = True, chunk_size=1024*1024
 
 #     return cleaned_content
 
-# def fix_xml_structure(content: bytes, root_tag: str) -> io.BytesIO:
-#     """
-#     Fix the XML structure by adding a root element and XML declaration if necessary.
+def fix_xml_structure(content: bytes, root_tag: str) -> io.BytesIO:
+    """
+    Fix the XML structure by adding a root element and XML declaration if necessary.
 
-#     Args:
-#         content (bytes): The original XML content.
+    Args:
+        content (bytes): The original XML content.
 
-#     Returns:
-#         io.BytesIO: A file-like object containing the fixed XML content.
-#     """
-#     # Check if the content already has a root element 
-#     if not content.strip().startswith(b'<?xml') and not content.strip().startswith(f'<{root_tag}>'.encode()):
-#         # Add root element and XML declaration
-#         fixed_content = f'<?xml version="1.0" encoding="UTF-8"?>\n<{root_tag}>\n'.encode() + content + f'\n</{root_tag}>'.encode()
-#     else:
-#         fixed_content = content
-#     # Return a file-like object containing the fixed content
-#     return io.BytesIO(fixed_content)
+    Returns:
+        io.BytesIO: A file-like object containing the fixed XML content.
+    """
+    # Check if the content already has a root element 
+    if not content.strip().startswith(b'<?xml') and not content.strip().startswith(f'<{root_tag}>'.encode()):
+        # Add root element and XML declaration
+        fixed_content = f'<?xml version="1.0" encoding="UTF-8"?>\n<{root_tag}>\n'.encode() + content + f'\n</{root_tag}>'.encode()
+    else:
+        fixed_content = content
+    # Return a file-like object containing the fixed content
+    return io.BytesIO(fixed_content)
 
 def parse_large_xml_to_df(file_path: str, data_type: str, chunk_size: int = 1000, download_chunk_size=1024*1024, use_tqdm: bool = True) -> Generator[pd.DataFrame, None, None]:
     """
