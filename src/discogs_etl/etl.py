@@ -60,7 +60,7 @@ def is_url(path: str) -> bool:
     except ValueError:
         return False
 
-def get_file_content_old(file_path: str, use_tqdm: bool = True, chunk_size=1024*1024) -> bytes:
+def get_file_content(file_path: str, use_tqdm: bool = True, chunk_size=1024*1024) -> bytes:
     """
     Retrieve the content of a file, either from a URL or local file system.
 
@@ -103,89 +103,89 @@ def get_file_content_old(file_path: str, use_tqdm: bool = True, chunk_size=1024*
 
     return content
 
-def get_file_content(file_path: str, use_tqdm: bool = True, chunk_size=1024*1024) -> io.BytesIO:
-    """
-    Retrieve the content of a file, either from a URL or local file system.
-    Handles gzip compression and streams the content.
+# def get_file_content(file_path: str, use_tqdm: bool = True, chunk_size=1024*1024) -> io.BytesIO:
+#     """
+#     Retrieve the content of a file, either from a URL or local file system.
+#     Handles gzip compression and streams the content.
 
-    Args:
-        file_path (str): The path or URL of the file to retrieve.
-        use_tqdm (bool): Flag whether to use tqdm for progress display.
-        chunk_size (int): Size of chunks to read at a time.
+#     Args:
+#         file_path (str): The path or URL of the file to retrieve.
+#         use_tqdm (bool): Flag whether to use tqdm for progress display.
+#         chunk_size (int): Size of chunks to read at a time.
 
-    Returns:
-        io.BytesIO: A BytesIO object containing the file content.
+#     Returns:
+#         io.BytesIO: A BytesIO object containing the file content.
 
-    Raises:
-        requests.HTTPError: If there's an error downloading the file from a URL.
-        IOError: If there's an error reading the local file.
-    """
-    content = io.BytesIO()
+#     Raises:
+#         requests.HTTPError: If there's an error downloading the file from a URL.
+#         IOError: If there's an error reading the local file.
+#     """
+#     content = io.BytesIO()
 
-    if is_url(file_path):
-        response = requests.get(file_path, stream=True)
-        response.raise_for_status()
-        total_size = int(response.headers.get('content-length', 0))
+#     if is_url(file_path):
+#         response = requests.get(file_path, stream=True)
+#         response.raise_for_status()
+#         total_size = int(response.headers.get('content-length', 0))
         
-        if use_tqdm:
-            progress_bar = tqdm(total=total_size, unit='iB', unit_scale=True, desc='Downloading')
+#         if use_tqdm:
+#             progress_bar = tqdm(total=total_size, unit='iB', unit_scale=True, desc='Downloading')
         
-        for chunk in response.iter_content(chunk_size=chunk_size):
-            if chunk:
-                content.write(chunk)
-                if use_tqdm:
-                    progress_bar.update(len(chunk))
+#         for chunk in response.iter_content(chunk_size=chunk_size):
+#             if chunk:
+#                 content.write(chunk)
+#                 if use_tqdm:
+#                     progress_bar.update(len(chunk))
         
-        if use_tqdm:
-            progress_bar.close()
-    else:
-        with open(file_path, 'rb') as file:
-            content.write(file.read())
+#         if use_tqdm:
+#             progress_bar.close()
+#     else:
+#         with open(file_path, 'rb') as file:
+#             content.write(file.read())
 
-    content.seek(0)
+#     content.seek(0)
 
-    # Check if the content is gzip-compressed
-    if content.read(2) == b'\x1f\x8b':
-        print("Decompressing gzip content...")
-        content.seek(0)
-        decompressed = io.BytesIO()
-        try:
-            with gzip.GzipFile(fileobj=content, mode='rb') as gz:
-                while True:
-                    chunk = gz.read(chunk_size)
-                    if not chunk:
-                        break
-                    decompressed.write(chunk)
-        except (gzip.BadGzipFile, OSError) as e:
-            print(f"Warning: Encountered error while decompressing: {e}")
-            print("Attempting to continue with partial data...")
+#     # Check if the content is gzip-compressed
+#     if content.read(2) == b'\x1f\x8b':
+#         print("Decompressing gzip content...")
+#         content.seek(0)
+#         decompressed = io.BytesIO()
+#         try:
+#             with gzip.GzipFile(fileobj=content, mode='rb') as gz:
+#                 while True:
+#                     chunk = gz.read(chunk_size)
+#                     if not chunk:
+#                         break
+#                     decompressed.write(chunk)
+#         except (gzip.BadGzipFile, OSError) as e:
+#             print(f"Warning: Encountered error while decompressing: {e}")
+#             print("Attempting to continue with partial data...")
         
-        content = decompressed
+#         content = decompressed
 
-    content.seek(0)
-    print("Cleaning XML content...")
-    cleaned_content = io.BytesIO(clean_xml_content(content.read()))
+#     content.seek(0)
+#     print("Cleaning XML content...")
+#     cleaned_content = io.BytesIO(clean_xml_content(content.read()))
 
-    return cleaned_content
+#     return cleaned_content
 
-def fix_xml_structure(content: bytes, root_tag: str) -> io.BytesIO:
-    """
-    Fix the XML structure by adding a root element and XML declaration if necessary.
+# def fix_xml_structure(content: bytes, root_tag: str) -> io.BytesIO:
+#     """
+#     Fix the XML structure by adding a root element and XML declaration if necessary.
 
-    Args:
-        content (bytes): The original XML content.
+#     Args:
+#         content (bytes): The original XML content.
 
-    Returns:
-        io.BytesIO: A file-like object containing the fixed XML content.
-    """
-    # Check if the content already has a root element 
-    if not content.strip().startswith(b'<?xml') and not content.strip().startswith(f'<{root_tag}>'.encode()):
-        # Add root element and XML declaration
-        fixed_content = f'<?xml version="1.0" encoding="UTF-8"?>\n<{root_tag}>\n'.encode() + content + f'\n</{root_tag}>'.encode()
-    else:
-        fixed_content = content
-    # Return a file-like object containing the fixed content
-    return io.BytesIO(fixed_content)
+#     Returns:
+#         io.BytesIO: A file-like object containing the fixed XML content.
+#     """
+#     # Check if the content already has a root element 
+#     if not content.strip().startswith(b'<?xml') and not content.strip().startswith(f'<{root_tag}>'.encode()):
+#         # Add root element and XML declaration
+#         fixed_content = f'<?xml version="1.0" encoding="UTF-8"?>\n<{root_tag}>\n'.encode() + content + f'\n</{root_tag}>'.encode()
+#     else:
+#         fixed_content = content
+#     # Return a file-like object containing the fixed content
+#     return io.BytesIO(fixed_content)
 
 def parse_large_xml_to_df(file_path: str, data_type: str, chunk_size: int = 1000, download_chunk_size=1024*1024, use_tqdm: bool = True) -> Generator[pd.DataFrame, None, None]:
     """
