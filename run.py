@@ -7,6 +7,7 @@ if __name__ == "__main__":
     # artist_url = "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2008/discogs_20080309_artists.xml.gz"
     artist_url = "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2019/discogs_20190501_artists.xml.gz"
     label_url = "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2008/discogs_20080309_labels.xml.gz"
+    label_201009 = "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2010/discogs_20100902_labels.xml.gz"
     label201201_url = "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2012/discogs_20120101_labels.xml.gz"
     master_url = "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2016/discogs_20161001_masters.xml.gz"
     release_url = "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2010/discogs_20100902_releases.xml.gz"
@@ -21,7 +22,7 @@ if __name__ == "__main__":
     # )
 
     stream_xml_to_parquet_s3(
-        input_file=local_release_url,
+        input_file=label_201009,
         bucket_name="discogs-data",
         chunk_size=1000,
         download_chunk_size=1024*1024*4 # ~4MB,
