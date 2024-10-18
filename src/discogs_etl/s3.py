@@ -1,6 +1,6 @@
 import boto3
 from urllib.parse import urlparse
-from typing import List, Optional
+from typing import List, Optional, Callable
 from botocore.exceptions import ClientError
 from datetime import datetime
 
@@ -178,3 +178,66 @@ def initialize_bucket_structure(bucket_name: str) -> None:
             print(f"Initialized structure for {data_type}")
         except ClientError as e:
             print(f"Error initializing {data_type}: {e}")
+
+def stream_to_s3(bucket_name: str, s3_key: str, data_generator: Callable, region: Optional[str] = None):
+    """
+    Stream data to S3 using multipart upload.
+
+    Args:
+        bucket_name (str): The name of the S3 bucket.
+        s3_key (str): The S3 object key.
+        data_generator (Callable): A generator function that yields data chunks.
+        region (Optional[str]): The AWS region for the S3 bucket. If None, uses the default region.
+
+    Returns:
+        str: The ETag of the uploaded object.
+
+    Raises:
+        Exception: If any error occurs during the upload process.
+    """
+    s3_client = boto3.client('s3', region_name=region)
+    
+    try:
+        # Initialize multipart upload
+        multipart_upload = s3_client.create_multipart_upload(Bucket=bucket_name, Key=s3_key)
+        upload_id = multipart_upload['UploadId']
+        
+        parts = []
+        part_number = 1
+
+        for chunk in data_generator:
+            import ipdb
+            ipdb.set_trace()
+            part = s3_client.upload_part(
+                Bucket=bucket_name,
+                Key=s3_key,
+                PartNumber=part_number,
+                UploadId=upload_id,
+                Body=chunk
+            )
+            parts.append({
+                'PartNumber': part_number,
+                'ETag': part['ETag']
+            })
+            part_number += 1
+
+        # Complete the multipart upload
+        result = s3_client.complete_multipart_upload(
+            Bucket=bucket_name,
+            Key=s3_key,
+            UploadId=upload_id,
+            MultipartUpload={'Parts': parts}
+        )
+        
+        return result['ETag']
+
+    except Exception as e:
+        print(f"An error occurred during multipart upload: {str(e)}")
+        # Abort the multipart upload if it was initiated
+        if 'upload_id' in locals():
+            s3_client.abort_multipart_upload(
+                Bucket=bucket_name,
+                Key=s3_key,
+                UploadId=upload_id
+            )
+        raise
