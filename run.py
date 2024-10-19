@@ -22,7 +22,7 @@ def run():
     # )
 
     stream_xml_to_parquet_s3(
-        input_file=label_201009,
+        input_file=release_url,
         bucket_name="discogs-data",
         chunk_size=1000,
         download_chunk_size=1024*1024*4 # ~4MB,
@@ -62,8 +62,7 @@ def lambda_handler(event, context):
 if __name__ == "__main__":
     # Example local execution
     event = {
-        'input_file': "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2010/discogs_20100902_labels.xml.gz",
+        'input_file': "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2010/discogs_20100902_releases.xml.gz",
         'bucket_name': "discogs-data"
     }
     print(lambda_handler(event, None))    
-    

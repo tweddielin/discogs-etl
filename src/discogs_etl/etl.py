@@ -60,6 +60,26 @@ def is_url(path: str) -> bool:
     except ValueError:
         return False
 
+def lenient_gzip_decompress(data):
+    """
+    Attempt to decompress gzip data, ignoring CRC check failures.
+    """
+    try:
+        return gzip.decompress(data)
+    except gzip.BadGzipFile as e:
+        if "CRC check failed" in str(e):
+            print("Warning: CRC check failed, attempting lenient decompression...")
+            buffer = io.BytesIO(data)
+            decompressor = gzip.GzipFile(fileobj=buffer)
+            try:
+                return decompressor.read()
+            except Exception as inner_e:
+                print(f"Lenient decompression failed: {inner_e}")
+                raise
+        else:
+            raise
+
+
 def get_file_content(file_path: str, use_tqdm: bool = True, chunk_size=1024*1024) -> bytes:
     """
     Retrieve the content of a file, either from a URL or local file system.
@@ -74,29 +94,41 @@ def get_file_content(file_path: str, use_tqdm: bool = True, chunk_size=1024*1024
         requests.HTTPError: If there's an error downloading the file from a URL.
         IOError: If there's an error reading the local file.
     """
-    if is_url(file_path):
-        response = requests.get(file_path, stream=True)
-        response.raise_for_status()
-        total_size = int(response.headers.get('content-length', 0))
+    # if is_url(file_path):
+    #     response = requests.get(file_path, stream=True)
+    #     response.raise_for_status()
+    #     total_size = int(response.headers.get('content-length', 0))
         
-        content = b''
-        if use_tqdm:
-            progress_bar = tqdm(total=total_size, unit='iB', unit_scale=True, desc='Downloading')
-        for chunk in response.iter_content(chunk_size=chunk_size):
-            if chunk:
-                content += chunk
-                if use_tqdm:
-                    progress_bar.update(len(chunk))
-        if use_tqdm:
-            progress_bar.close()
+    #     content = b''
+    #     if use_tqdm:
+    #         progress_bar = tqdm(total=total_size, unit='iB', unit_scale=True, desc='Downloading')
+    #     for chunk in response.iter_content(chunk_size=chunk_size):
+    #         if chunk:
+    #             content += chunk
+    #             if use_tqdm:
+    #                 progress_bar.update(len(chunk))
+    #     if use_tqdm:
+    #         progress_bar.close()
+    # else:
+    #     with open(file_path, 'rb') as file:
+    #         content = file.read()
+    
+    if is_url(file_path):
+        response = requests.get(file_path)
+        response.raise_for_status()
+        content = response.content
     else:
         with open(file_path, 'rb') as file:
             content = file.read()
-    
+
     # Check if the content is gzip-compressed
     if content[:2] == b'\x1f\x8b':
         print("Decompressing gzip content...")
-        content = gzip.decompress(content)
+        try:
+            content = lenient_gzip_decompress(content)
+        except Exception as e:
+            print(f"Decompression failed: {e}")
+            print("Proceeding with compressed content...")
     
     print("Cleaning XML content...")
     content = clean_xml_content(content)
