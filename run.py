@@ -24,9 +24,9 @@ def run():
     # )
 
     stream_xml_to_parquet_s3(
-        input_file=artist_url,
+        input_file=label201201_url,
         bucket_name="discogs-data",
-        chunk_size=2000,
+        chunk_size=1000,
         download_chunk_size=1024*1024*4 # ~4MB,
     )
 

@@ -1,7 +1,5 @@
 from lxml import etree
 from typing import Dict, List, Optional, Generator, Any
-import pandas as pd
-import pyarrow as pa
 import io
 import gzip
 import requests
@@ -193,11 +191,11 @@ def process_large_xml_label(file_path: str, data_type: str, chunk_size: int = 10
             if item_data:  # Only add non-empty dictionaries
                 chunk.append(item_data)
             if len(chunk) == chunk_size:
-                yield pd.DataFrame(chunk)
+                yield chunk
                 chunk = []
             elem.clear()
     if chunk:
-        yield pd.DataFrame(chunk)
+        yield chunk
 
 def process_large_xml(file_path: str, data_type: str, chunk_size: int = 1000, download_chunk_size=1024*1024, use_tqdm: bool = True) -> Generator[List[Dict[str, Optional[str]]], None, None]:
     """

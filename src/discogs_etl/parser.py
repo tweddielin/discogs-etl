@@ -1,6 +1,4 @@
-from lxml import etree
 import pyarrow as pa
-import io
 
 def create_arrays_from_chunk(chunk, schema):
     arrays = {}

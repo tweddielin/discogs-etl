@@ -80,7 +80,11 @@ def stream_xml_to_parquet_s3(input_file: str, bucket_name: str, region: Optional
         with pq.ParquetWriter(buffer, schema) as writer:
             total_rows = 0
             for i, chunk in enumerate(parser):
-                processed_chunk = create_arrays_from_chunk(chunk, schema)
+                try:
+                    processed_chunk = create_arrays_from_chunk(chunk, schema)
+                except:
+                    import ipdb
+                    ipdb.set_trace()
                 table = pa.Table.from_pydict(processed_chunk, schema=schema)
                 writer.write_table(table)
                 total_rows += len(chunk)
