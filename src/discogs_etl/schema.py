@@ -1,6 +1,6 @@
 import pyarrow as pa
 
-masters_schema = pa.schema([
+master_schema = pa.schema([
     ('id', pa.int64()),
     ('main_release', pa.int64()),
     ('artists', pa.list_(pa.struct([
@@ -32,7 +32,7 @@ masters_schema = pa.schema([
     ])))
 ])
 
-labels_schema = pa.schema([
+label_schema = pa.schema([
         ('id', pa.int64()),
         ('name', pa.string()),
         ('contactinfo', pa.string()),
@@ -49,7 +49,7 @@ labels_schema = pa.schema([
         ('sublabels', pa.list_(pa.string()))
     ])
 
-releases_schema = pa.schema([
+release_schema = pa.schema([
         ('id', pa.int64()),
         ('status', pa.string()),
         ('title', pa.string()),
@@ -77,8 +77,29 @@ releases_schema = pa.schema([
         ('styles', pa.list_(pa.string()))
     ])
 
+artist_schema = pa.schema([
+        ('id', pa.int64()),
+        ('name', pa.string()),
+        ('realname', pa.string()),
+        ('profile', pa.string()),
+        ('data_quality', pa.string()),
+        ('urls', pa.list_(pa.string())),
+        ('namevariations', pa.list_(pa.string())),
+        ('aliases', pa.list_(pa.string())),
+        ('groups', pa.list_(pa.string())),
+        ('members', pa.list_(pa.string())),
+        ('images', pa.list_(pa.struct([
+            ('height', pa.int32()),
+            ('width', pa.int32()),
+            ('type', pa.string()),
+            ('uri', pa.string()),
+            ('uri150', pa.string())
+        ])))
+    ])
+
 SCHEMAS = {
-    "masters": masters_schema,
-    "labels": labels_schema,
-    "releases": releases_schema,
+    "master": master_schema,
+    "label": label_schema,
+    "release": release_schema,
+    "artist": artist_schema,
 }

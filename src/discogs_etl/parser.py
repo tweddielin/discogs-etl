@@ -144,16 +144,38 @@ class XMLParser(object):
         return record
 
     def _parse_artists_data(self, elem):
-        pass
-    
+        record = {
+            'id': int(elem.findtext('id') or 0),
+            'name': elem.findtext('name'),
+            'realname': elem.findtext('realname'),
+            'profile': elem.findtext('profile'),
+            'data_quality': elem.findtext('data_quality'),
+            'urls': [url.text for url in elem.findall('.//urls/url')],
+            'namevariations': [name.text for name in elem.findall('.//namevariations/name')],
+            'aliases': [name.text for name in elem.findall('.//aliases/name')],
+            'groups': [name.text for name in elem.findall('.//groups/name')],
+            'members': [name.text for name in elem.findall('.//members/name')],
+            'images': []
+        }
+        
+        for image in elem.findall('.//images/image'):
+            record['images'].append({
+                'height': int(image.get('height') or 0),
+                'width': int(image.get('width') or 0),
+                'type': image.get('type'),
+                'uri': image.get('uri'),
+                'uri150': image.get('uri150')
+            })
+        return record
+        
     def parse_element(self, elem):
-        if self.data_type == "masters":
+        if self.data_type == "master":
             return self._parse_masters_data(elem)
-        elif self.data_type == "labels":
+        elif self.data_type == "label":
             return self._parse_labels_data(elem)
-        elif self.data_type == "releases":
+        elif self.data_type == "release":
             return self._parse_releases_data(elem)
-        elif self.data_type == "artists":
+        elif self.data_type == "artist":
             return self._parse_artists_data(elem)
         else:
             raise NotImplementedError(f"The parse method for data_type {self.data_type} is not implemented.")

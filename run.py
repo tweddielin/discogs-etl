@@ -11,7 +11,9 @@ def run():
     label201201_url = "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2012/discogs_20120101_labels.xml.gz"
     master_url = "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2016/discogs_20161001_masters.xml.gz"
     release_url = "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2010/discogs_20100902_releases.xml.gz"
-    local_release_url = "/Users/tweddielin/Downloads/discogs_20100902_releases.xml.gz"
+    release_url_200901 = "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2009/discogs_20090901_releases.xml.gz"
+    local_release_url = "/Users/tweddielin/Downloads/discogs_20100902_releases.xml"
+
     # data_url = "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2008/discogs_20080309_releases.xml.gz"
     
     # process_xml_to_parquet_s3(
@@ -22,9 +24,9 @@ def run():
     # )
 
     stream_xml_to_parquet_s3(
-        input_file=release_url,
+        input_file=artist_url,
         bucket_name="discogs-data",
-        chunk_size=1000,
+        chunk_size=2000,
         download_chunk_size=1024*1024*4 # ~4MB,
     )
 
@@ -60,9 +62,10 @@ def lambda_handler(event, context):
 
 # This part is optional and only used when running the script locally
 if __name__ == "__main__":
-    # Example local execution
-    event = {
-        'input_file': "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2010/discogs_20100902_releases.xml.gz",
-        'bucket_name': "discogs-data"
-    }
-    print(lambda_handler(event, None))    
+    # # Example local execution
+    # event = {
+    #     'input_file': "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2010/discogs_20100902_releases.xml.gz",
+    #     'bucket_name': "discogs-data"
+    # }
+    # print(lambda_handler(event, None))    
+    run()
