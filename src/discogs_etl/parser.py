@@ -3,21 +3,24 @@ import pyarrow as pa
 def create_arrays_from_chunk(chunk, schema):
     arrays = {}
     for field in schema:
-        if pa.types.is_list(field.type):
-            # Handle list types (like artists, genres, styles, images, videos)
-            item_type = field.type.value_type
-            if pa.types.is_struct(item_type):
-                # For lists of structs (like artists, images, videos)
+        try:
+            if pa.types.is_list(field.type):
+                # Handle list types (like artists, genres, styles, images, videos)
+                item_type = field.type.value_type
+                if pa.types.is_struct(item_type):
+                    # For lists of structs (like artists, images, videos)
+                    arrays[field.name] = pa.array([r[field.name] for r in chunk], type=field.type)
+                else:
+                    # For simple lists (like genres, styles)
+                    arrays[field.name] = pa.array([r[field.name] for r in chunk])
+            elif pa.types.is_integer(field.type):
+                # Handle integer types
                 arrays[field.name] = pa.array([r[field.name] for r in chunk], type=field.type)
             else:
-                # For simple lists (like genres, styles)
+                # Handle other types (like strings)
                 arrays[field.name] = pa.array([r[field.name] for r in chunk])
-        elif pa.types.is_integer(field.type):
-            # Handle integer types
-            arrays[field.name] = pa.array([r[field.name] for r in chunk], type=field.type)
-        else:
-            # Handle other types (like strings)
-            arrays[field.name] = pa.array([r[field.name] for r in chunk])
+        except Exception as e:
+            print(f"Error creating array for field {field.name}: {e}")
     return arrays
 
 class XMLParser(object):
@@ -35,7 +38,6 @@ class XMLParser(object):
             'urls': [],
             'sublabels': []
         }
-        
         for image in elem.findall('.//images/image'):
             record['images'].append({
                 'width': int(image.get('width') or 0),
@@ -132,7 +134,7 @@ class XMLParser(object):
         for format in elem.findall('.//formats/format'):
             format_record = {
                 'name': format.get('name'),
-                'qty': int(format.get('qty') or 1),
+                'qty': str(format.get('qty') or 1),
                 'descriptions': [desc.text for desc in format.findall('.//description')]
             }
             record['formats'].append(format_record)

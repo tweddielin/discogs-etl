@@ -1,8 +1,10 @@
 from lxml import etree
-from typing import Dict, List, Optional, Generator, Any
+from typing import Dict, List, Optional, Generator, Any, Literal
 import io
 import gzip
 import requests
+import tempfile
+import hashlib
 import re
 from discogs_etl.s3 import get_default_region, get_s3_output_path, upload_to_s3, stream_to_s3
 from discogs_etl.parser import XMLParser
@@ -12,6 +14,9 @@ from discogs_etl.utils import (
     is_url, 
 )
 from discogs_etl.config import DISCOGS_CONFIGS
+from discogs_etl.io import BufferedStreamReader, StreamingXMLHandler, GzipStreamReader, OptimizedDownloader
+from pathlib import Path
+from urllib.parse import urlparse
 
 
 class XMLFixerStreamReader:
@@ -21,7 +26,6 @@ class XMLFixerStreamReader:
         self.in_release = False
         self.data_type = data_type
         self.target_tag = f"</{data_type}>".encode()
-        print(self.target_tag)
 
     def __iter__(self):
         for chunk in self.stream:
@@ -88,6 +92,87 @@ def get_file_content_streaming(file_path: str, chunk_size: int = 1024 * 1024) ->
                     break
                 yield chunk
 
+def download_file_with_checksum(
+    url: str,
+    output_file: str,
+    expected_checksum: Optional[str] = None,
+    algorithm: Literal["md5", "sha1", "sha256", "sha512"] = "sha256",
+    chunk_size: int = 8192
+) -> tuple[str, bool]:
+    """
+    Download a file while simultaneously calculating its checksum.
+    
+    Args:
+        url: URL of the file to download
+        output_file: Path where the file should be saved
+        expected_checksum: Expected checksum to verify against (optional)
+        algorithm: Hash algorithm to use (md5, sha1, sha256, or sha512)
+        chunk_size: Size of chunks to download and process
+        
+    Returns:
+        tuple: (calculated_checksum, verification_result)
+        verification_result will be None if no expected_checksum was provided
+    """
+    # Initialize appropriate hasher
+    hash_algorithms = {
+        "md5": hashlib.md5(),
+        "sha1": hashlib.sha1(),
+        "sha256": hashlib.sha256(),
+        "sha512": hashlib.sha512()
+    }
+    
+    if algorithm.lower() not in hash_algorithms:
+        raise ValueError(f"Unsupported algorithm. Choose from: {', '.join(hash_algorithms.keys())}")
+    
+    hasher = hash_algorithms[algorithm.lower()]
+    
+    # Create output directory if it doesn't exist
+    output_path = Path(output_file)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Get file size for progress tracking
+    response = requests.get(url, stream=True)
+    response.raise_for_status()
+    total_size = int(response.headers.get('content-length', 0))
+    
+    # Download and calculate checksum simultaneously
+    downloaded_size = 0
+    
+    print(f"Downloading: {Path(urlparse(url).path).name}")
+    print(f"Destination: {output_file}")
+    print(f"Total size: {total_size / (1024*1024):.1f} MB")
+    
+    with open(output_file, 'wb') as f:
+        for chunk in response.iter_content(chunk_size=chunk_size):
+            if chunk:
+                f.write(chunk)
+                hasher.update(chunk)
+                downloaded_size += len(chunk)
+                
+                # Print progress
+                if total_size > 0:
+                    progress = (downloaded_size / total_size) * 100
+                    print(f"\rProgress: {progress:.1f}% | "
+                          f"Downloaded: {downloaded_size / (1024*1024):.1f} MB", end="")
+    
+    print("\nDownload complete!")
+    
+    # Get final checksum
+    calculated_checksum = hasher.hexdigest()
+    
+    # Verify if expected checksum was provided
+    verification_result = None
+    if expected_checksum:
+        verification_result = calculated_checksum.lower() == expected_checksum.lower()
+        print(f"\nChecksum verification {'successful' if verification_result else 'failed'}!")
+        print(f"Expected: {expected_checksum}")
+        print(f"Actual:   {calculated_checksum}")
+    else:
+        print(f"\n{algorithm.upper()} Checksum: {calculated_checksum}")
+    
+    return calculated_checksum, verification_result
+                
+
 
 def get_file_content(file_path: str, use_tqdm: bool = True, chunk_size=1000, stream=False):
     """
@@ -153,7 +238,7 @@ def fix_xml_structure(content: bytes, root_tag: str) -> io.BytesIO:
     return io.BytesIO(fixed_content)
 
 
-def process_large_xml_label(file_path: str, data_type: str, chunk_size: int = 1000, download_chunk_size=1024*1024, use_tqdm: bool = True) -> Generator[List[Dict[str, Optional[str]]], None, None]:
+def process_large_xml_label(file_path: str, data_type: str, chunk_size: int = 1000, use_tqdm: bool = True) -> Generator[List[Dict[str, Optional[str]]], None, None]:
     """
     Parse a large XML file into chunks of dictionaries.
 
@@ -197,7 +282,7 @@ def process_large_xml_label(file_path: str, data_type: str, chunk_size: int = 10
     if chunk:
         yield chunk
 
-def process_large_xml(file_path: str, data_type: str, chunk_size: int = 1000, download_chunk_size=1024*1024, use_tqdm: bool = True) -> Generator[List[Dict[str, Optional[str]]], None, None]:
+def process_large_xml(file_path: str, data_type: str, chunk_size: int = 1000, use_tqdm: bool = True) -> Generator[List[Dict[str, Optional[str]]], None, None]:
     """
     Parse a large XML file into chunks of dictionaries.
 
@@ -213,16 +298,20 @@ def process_large_xml(file_path: str, data_type: str, chunk_size: int = 1000, do
         raise ValueError(f"Unknown data type: {data_type}")
     
     # content = file_path
-    content = get_file_content(
-        file_path=file_path, 
-        use_tqdm=use_tqdm, 
-        chunk_size=download_chunk_size,
-    )
-    # content_generator = get_file_content_streaming(file_path, chunk_size=download_chunk_size)
-    content_generator = create_generator(content, chunk_size=chunk_size)
+    # content = get_file_content(
+    #     file_path=file_path, 
+    #     use_tqdm=use_tqdm, 
+    #     chunk_size=download_chunk_size,
+    # )
+    # content_generator = create_generator(content, chunk_size=chunk_size)
+    
+    gzip_reader = GzipStreamReader(file_path)
+    buffered_reader = BufferedStreamReader(gzip_reader)
+    xml_handler = StreamingXMLHandler(buffered_reader)
+
     # buffered_reader = BufferedStreamReader(content_generator)
     # xml_handler = StreamingXMLHandler(buffered_reader)
-    xml_fixer = XMLFixerStreamReader(content_generator, data_type=data_type)
+    xml_fixer = XMLFixerStreamReader(xml_handler, data_type=data_type)
     # content = fix_xml_structure(content, config['root_tag'])
     # context = etree.iterparse(xml_handler, events=('end',), recover=True)
     element_parser = XMLParser(data_type=data_type)

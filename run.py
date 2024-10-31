@@ -1,21 +1,47 @@
-from discogs_etl.etl import process_xml_to_parquet_s3, stream_xml_to_parquet_s3
+from discogs_etl.etl import stream_xml_to_parquet_s3
+from discogs_etl.s3 import list_s3_files, organize_discogs_files
 import os
 
 
 def run():
     # discogs_artist_20180101 = "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2018/discogs_20180101_artists.xml.gz"
     # artist_url = "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2008/discogs_20080309_artists.xml.gz"
-    artist_url = "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2019/discogs_20190501_artists.xml.gz"
-    label_url = "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2008/discogs_20080309_labels.xml.gz"
-    label_201009 = "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2010/discogs_20100902_labels.xml.gz"
-    label201201_url = "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2012/discogs_20120101_labels.xml.gz"
-    master_url = "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2016/discogs_20161001_masters.xml.gz"
-    release_url = "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2010/discogs_20100902_releases.xml.gz"
-    release_url_200901 = "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2009/discogs_20090901_releases.xml.gz"
-    local_release_url = "/Users/tweddielin/Downloads/discogs_20100902_releases.xml"
+    # artist_url = "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2019/discogs_20190501_artists.xml.gz"
+    # label_url = "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2008/discogs_20080309_labels.xml.gz"
+    # label_201009 = "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2010/discogs_20100902_labels.xml.gz"
+    # label201201_url = "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2012/discogs_20120101_labels.xml.gz"
+    # master_url = "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2016/discogs_20161001_masters.xml.gz"
+    # release_url = "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2010/discogs_20100902_releases.xml.gz"
+    # release_url_200901 = "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2009/discogs_20090901_releases.xml.gz"
+    # local_release_url = "/Users/tweddielin/Downloads/discogs_20100902_releases.xml"
 
     # data_url = "https://discogs-data-dumps.s3-us-west-2.amazonaws.com/data/2008/discogs_20080309_releases.xml.gz"
     
+    year = 2019
+    discogs_bucket_name = "discogs-data-dumps"
+    prefix = f"data/{year}"
+    base_url = "https://discogs-data-dumps.s3.us-west-2.amazonaws.com"
+    yearly_list = organize_discogs_files(
+        file_list=list_s3_files(bucket_name=discogs_bucket_name, prefix=prefix),
+        base_url=base_url,
+    )
+    for monthly_dump in yearly_list:
+        print(f"Monthly Dump: {monthly_dump.pop('year_month')}")
+        for data_type, value in monthly_dump.items():
+            url = monthly_dump[data_type]['url']
+            checksum = monthly_dump[data_type]['checksum']
+            date = monthly_dump[data_type]['date']
+            print(f"Currently Processing: {url} | Date: {date}")
+            stream_xml_to_parquet_s3(
+                    input_file=url,
+                    bucket_name="discogs-data",
+                    checksum=checksum,
+                    chunk_size=5000,
+                    download_chunk_size=1024*1024*10,
+            )
+
+
+
     # process_xml_to_parquet_s3(
     #     input_file=label201201_url,
     #     bucket_name="discogs-data",
@@ -23,12 +49,12 @@ def run():
     #     download_chunk_size=1024*1024*4 # ~4MB,
     # )
 
-    stream_xml_to_parquet_s3(
-        input_file=label201201_url,
-        bucket_name="discogs-data",
-        chunk_size=1000,
-        download_chunk_size=1024*1024*4 # ~4MB,
-    )
+    # stream_xml_to_parquet_s3(
+    #     input_file=label201201_url,
+    #     bucket_name="discogs-data",
+    #     chunk_size=1000,
+    #     download_chunk_size=1024*1024*4 # ~4MB,
+    # )
 
 def lambda_handler(event, context):
     # Get parameters from environment variables or event

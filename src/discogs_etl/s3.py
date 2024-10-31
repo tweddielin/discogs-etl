@@ -1,8 +1,13 @@
 import boto3
-from urllib.parse import urlparse
-from typing import List, Optional, Callable
-from botocore.exceptions import ClientError
+import requests
+import re
+from collections import defaultdict
 from datetime import datetime
+from urllib.parse import urlparse
+from typing import List, Optional, Callable, Dict
+from botocore.exceptions import ClientError
+from botocore import UNSIGNED
+from botocore.config import Config
 
 def get_default_region() -> str:
     """
@@ -241,3 +246,179 @@ def stream_to_s3(bucket_name: str, s3_key: str, data_generator: Callable, region
                 UploadId=upload_id
             )
         raise
+
+
+def list_s3_files(bucket_name, prefix):
+    """
+    List all files in an S3 bucket with a specific prefix.
+    Uses anonymous access for public buckets.
+
+    Example:
+        bucket_name = "discogs-data-dumps"
+        prefix = "data/2019/"
+
+        files = list_s3_files(bucket_name, prefix)
+    
+    Args:
+        bucket_name (str): Name of the S3 bucket
+        prefix (str): Prefix to filter objects
+        
+    Returns:
+        list: List of file names matching the prefix
+    """
+    # Create an S3 client with anonymous access
+    s3_client = boto3.client(
+        's3',
+        config=Config(signature_version=UNSIGNED)
+    )
+    
+    try:
+        # List objects in the bucket
+        paginator = s3_client.get_paginator('list_objects_v2')
+        pages = paginator.paginate(Bucket=bucket_name, Prefix=prefix)
+        
+        files = []
+        for page in pages:
+            if 'Contents' in page:
+                for obj in page['Contents']:
+                    files.append(obj['Key'])
+        
+        return files
+        
+    except Exception as e:
+        print(f"Error accessing S3 bucket: {e}")
+        return []
+    
+def parse_checksum_file(url: str) -> Dict[str, str]:
+    """
+    Parse a CHECKSUM.txt file from Discogs and return a dictionary of filename to checksum.
+    Handles both formats:
+    - "<checksum> *<filename>"
+    - "<checksum> <filename>"
+    
+    Args:
+        url: URL to the CHECKSUM.txt file
+        
+    Returns:
+        Dictionary mapping filenames to their checksums
+    """
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        
+        checksums = {}
+        for line in response.text.splitlines():
+            if not line.strip():
+                continue
+                
+            # Split on whitespace
+            parts = line.strip().split()
+            
+            # Handle case where there might be multiple spaces
+            if len(parts) >= 2:
+                checksum = parts[0]
+                # Join remaining parts and remove any asterisk
+                filename = ' '.join(parts[1:]).replace('*', '').strip()
+                checksums[filename] = checksum
+                
+        return checksums
+    except Exception as e:
+        print(f"Error parsing checksum file {url}: {e}")
+        return {}
+
+def organize_discogs_files(
+    file_list: List[str],
+    base_url: str = "https://discogs-data-dumps.s3.us-west-2.amazonaws.com"
+) -> List[Dict[str, Dict[str, str]]]:
+    """
+    Organize Discogs data files into structured format grouped by year-month.
+    Takes the latest file for each type within the month.
+    
+    Args:
+        file_list: List of file paths from S3 bucket
+        base_url: Base URL of the S3 bucket
+        
+    Returns:
+        List of dictionaries containing organized file information
+    """
+    # Regular expressions for parsing file names
+    date_pattern = r"discogs_(\d{4})(\d{2})(\d{2})_"
+    file_type_pattern = r"discogs_\d{8}_(\w+)\.xml\.gz"
+    
+    # Group files by year-month
+    monthly_files: Dict[str, Dict[str, Dict]] = defaultdict(lambda: defaultdict(dict))
+    monthly_checksums: Dict[str, Dict[str, str]] = defaultdict(dict)
+    
+    # First pass: collect all files and organize by year-month
+    for file_path in file_list:
+        date_match = re.search(date_pattern, file_path)
+        if not date_match:
+            continue
+            
+        year, month, day = date_match.groups()
+        year_month = f"{year}-{month}"
+        full_date = f"{year}{month}{day}"
+        
+        # Handle checksum files
+        if file_path.endswith('CHECKSUM.txt'):
+            if full_date not in monthly_checksums[year_month] or full_date > monthly_checksums[year_month].get('date', ''):
+                monthly_checksums[year_month] = {
+                    'date': full_date,
+                    'path': file_path
+                }
+            continue
+            
+        type_match = re.search(file_type_pattern, file_path)
+        if not type_match:
+            continue
+            
+        file_type = type_match.group(1)
+        
+        # Store file info with its date for later comparison
+        current_info = {
+            'date': full_date,
+            'path': file_path
+        }
+        
+        # Update only if this is the first file of its type or if it's newer
+        if (file_type not in monthly_files[year_month] or 
+            current_info['date'] > monthly_files[year_month][file_type]['date']):
+            monthly_files[year_month][file_type] = current_info
+    
+    # Process each year-month and create final structure
+    result = []
+    type_mapping = {
+        'artists': 'artist',
+        'masters': 'master',
+        'labels': 'label',
+        'releases': 'release'
+    }
+    
+    for year_month in sorted(monthly_files.keys()):
+        # Get checksums if available for this month
+        checksums = {}
+        if year_month in monthly_checksums:
+            checksum_path = monthly_checksums[year_month]['path']
+            checksum_url = f"{base_url}/{checksum_path}"
+            checksums = parse_checksum_file(checksum_url)
+        
+        # Create entry for this month
+        entry = {}
+        
+        for file_type, file_info in monthly_files[year_month].items():
+            simple_type = type_mapping.get(file_type)
+            if simple_type:
+                file_path = file_info['path']
+                filename = file_path.split('/')[-1]
+                entry[simple_type] = {
+                    'url': f"{base_url}/{file_path}",
+                    'checksum': checksums.get(filename, ''),
+                    'date': datetime.strptime(file_info['date'], '%Y%m%d').strftime('%Y-%m-%d')
+                }
+        
+        if entry:  # Only add if we have any files
+            # Add metadata
+            entry['year_month'] = year_month
+            result.append(entry)
+    
+    return result

@@ -6,16 +6,17 @@ import io
 import tempfile
 import os
 import boto3
-import tempfile
 from discogs_etl.s3 import get_default_region, get_s3_output_path, upload_to_s3
 from discogs_etl.parser import create_arrays_from_chunk
 from discogs_etl.schema import SCHEMAS
 from discogs_etl.utils import (
     detect_data_type,
+    is_url
 )
-from discogs_etl.process import process_large_xml, process_large_xml_label
+from discogs_etl.process import process_large_xml, process_large_xml_label, download_file_with_checksum
+from discogs_etl.io import OptimizedDownloader
 
-def stream_xml_to_parquet_s3(input_file: str, bucket_name: str, region: Optional[str] = None, chunk_size: int = 1000, download_chunk_size=1024*1024, use_tqdm: bool = True) -> None:
+def stream_xml_to_parquet_s3(input_file: str, bucket_name: str, checksum: str = None, region: Optional[str] = None, chunk_size: int = 1000, download_chunk_size=1024*1024, use_tqdm: bool = True) -> None:
     """
     Stream an XML file to Parquet format directly to S3.
 
@@ -41,109 +42,142 @@ def stream_xml_to_parquet_s3(input_file: str, bucket_name: str, region: Optional
 
     # Initialize S3 client
     s3_client = boto3.client('s3', region_name=region)
-
-    try:
-        if data_type == 'label':
-            parser = process_large_xml_label(
-                file_path=input_file, 
-                data_type=data_type, 
-                chunk_size=chunk_size, 
-                download_chunk_size=download_chunk_size, 
-                use_tqdm=use_tqdm
-            )
-        else:
-            parser = process_large_xml(
-                file_path=input_file, 
-                data_type=data_type, 
-                chunk_size=chunk_size, 
-                download_chunk_size=download_chunk_size, 
-                use_tqdm=use_tqdm
-            )
-        
-        # Get the schema
-        schema = SCHEMAS[data_type]
-        
-        # Generate S3 key
-        s3_key = get_s3_output_path(input_file, bucket_name)
-        
-        # Initialize multipart upload
-        multipart_upload = s3_client.create_multipart_upload(Bucket=bucket_name, Key=s3_key)
-        upload_id = multipart_upload['UploadId']
-        
-        parts = []
-        part_number = 1
-        
-        # Create an in-memory buffer
-        buffer = io.BytesIO()
-        
-        # Open a ParquetWriter that writes to the buffer
-        with pq.ParquetWriter(buffer, schema) as writer:
-            total_rows = 0
-            for i, chunk in enumerate(parser):
-                try:
-                    processed_chunk = create_arrays_from_chunk(chunk, schema)
-                except:
-                    import ipdb
-                    ipdb.set_trace()
-                table = pa.Table.from_pydict(processed_chunk, schema=schema)
-                writer.write_table(table)
-                total_rows += len(chunk)
-                print(f"Processed chunk {i} ({len(chunk)} rows)")
-                
-                # Check if the buffer size is large enough to upload
-                if buffer.tell() > 5 * 1024 * 1024:  # 5MB minimum for multipart upload
-                    buffer.seek(0)
-                    # Upload parts as buffer fills
-                    part = s3_client.upload_part(
-                        Bucket=bucket_name,
-                        Key=s3_key,
-                        PartNumber=part_number,
-                        UploadId=upload_id,
-                        Body=buffer.read()
-                    )
-                    parts.append({
-                        'PartNumber': part_number,
-                        'ETag': part['ETag']
-                    })
-                    part_number += 1
-                    buffer.seek(0)
-                    buffer.truncate() # Clear the buffer but keep using the same writer
-        
-        # Upload any remaining data
-        if buffer.tell() > 0:
-            buffer.seek(0)
-            part = s3_client.upload_part(
-                Bucket=bucket_name,
-                Key=s3_key,
-                PartNumber=part_number,
-                UploadId=upload_id,
-                Body=buffer.read()
-            )
-            parts.append({
-                'PartNumber': part_number,
-                'ETag': part['ETag']
-            })
-        
-        # Complete the multipart upload
-        result = s3_client.complete_multipart_upload(
-            Bucket=bucket_name,
-            Key=s3_key,
-            UploadId=upload_id,
-            MultipartUpload={'Parts': parts}
-        )
-        
-        print(f"Successfully uploaded {total_rows} rows to s3://{bucket_name}/{s3_key} with ETag: {result['ETag']}")
     
-    except Exception as e:
-        print(f"An error occurred: {str(e)}")
-        # Abort the multipart upload if it was initiated
-        if 'upload_id' in locals():
-            s3_client.abort_multipart_upload(
+
+    with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+        temp_downloaded_file = temp_file.name
+        print(f"Created temporary file: {temp_downloaded_file}")
+        
+        if is_url(input_file):
+            if data_type in ["release", "master", "artist"]:
+                downloader = OptimizedDownloader(
+                    url=input_file,
+                    output_path=temp_downloaded_file,
+                    max_workers=8,
+                    chunk_size=8 * 1024 * 1024,
+                    read_timeout=300,
+                    algorithm="sha256",
+                )
+                downloader.download()
+                downloader.verify_checksum(checksum)
+            elif data_type == "label":
+                download_file_with_checksum(
+                    url = input_file,
+                    output_file=temp_downloaded_file,
+                    algorithm="sha256",
+                    expected_checksum=checksum,
+                    chunk_size=download_chunk_size,
+                )
+            else:
+                raise NotImplementedError(f"{data_type} unrecognized.")
+        else:
+            temp_downloaded_file = input_file
+        
+        try:
+            if data_type == 'label':
+                parser = process_large_xml_label(
+                    file_path=temp_downloaded_file, 
+                    data_type=data_type, 
+                    chunk_size=chunk_size, 
+                    use_tqdm=use_tqdm
+                )
+            else:
+                parser = process_large_xml(
+                    file_path=temp_downloaded_file, 
+                    data_type=data_type, 
+                    chunk_size=chunk_size, 
+                    use_tqdm=use_tqdm
+                )
+            
+            # Get the schema
+            schema = SCHEMAS[data_type]
+            
+            # Generate S3 key
+            s3_key = get_s3_output_path(input_file, bucket_name)
+            
+            # Initialize multipart upload
+            multipart_upload = s3_client.create_multipart_upload(Bucket=bucket_name, Key=s3_key)
+            upload_id = multipart_upload['UploadId']
+            
+            parts = []
+            part_number = 1
+            
+            # Create an in-memory buffer
+            buffer = io.BytesIO()
+            
+            # Open a ParquetWriter that writes to the buffer
+            with pq.ParquetWriter(buffer, schema) as writer:
+                total_rows = 0
+                for i, chunk in enumerate(parser):
+                    try:
+                        processed_chunk = create_arrays_from_chunk(chunk, schema)
+                    # If an error occurs, print the chunk and raise an exception
+                    except Exception as e:
+                        print(f"Error processing chunk {i}: {chunk}")
+                        raise e
+                    table = pa.Table.from_pydict(processed_chunk, schema=schema)
+                    writer.write_table(table)
+                    total_rows += len(chunk)
+                    print(f"\rProgress: chunk {i} | "
+                          f"Rows: {total_rows}", end="")
+                    # Check if the buffer size is large enough to upload
+                    if buffer.tell() > 5 * 1024 * 1024:  # 5MB minimum for multipart upload
+                        buffer.seek(0)
+                        # Upload parts as buffer fills
+                        part = s3_client.upload_part(
+                            Bucket=bucket_name,
+                            Key=s3_key,
+                            PartNumber=part_number,
+                            UploadId=upload_id,
+                            Body=buffer.read()
+                        )
+                        parts.append({
+                            'PartNumber': part_number,
+                            'ETag': part['ETag']
+                        })
+                        part_number += 1
+                        buffer.seek(0)
+                        buffer.truncate() # Clear the buffer but keep using the same writer
+            
+            # Upload any remaining data
+            if buffer.tell() > 0:
+                buffer.seek(0)
+                part = s3_client.upload_part(
+                    Bucket=bucket_name,
+                    Key=s3_key,
+                    PartNumber=part_number,
+                    UploadId=upload_id,
+                    Body=buffer.read()
+                )
+                parts.append({
+                    'PartNumber': part_number,
+                    'ETag': part['ETag']
+                })
+            
+            # Complete the multipart upload
+            result = s3_client.complete_multipart_upload(
                 Bucket=bucket_name,
                 Key=s3_key,
-                UploadId=upload_id
+                UploadId=upload_id,
+                MultipartUpload={'Parts': parts}
             )
-        raise
+            
+            print(f"\nSuccessfully uploaded {total_rows} rows to s3://{bucket_name}/{s3_key} with ETag: {result['ETag']}")
+            
+            # delete temp file
+            os.unlink(temp_downloaded_file)
+            print(f"Deleted temporary file: {temp_downloaded_file}")
+
+        except Exception as e:
+            print(f"An error occurred: {str(e)}")
+            # Abort the multipart upload if it was initiated
+            if 'upload_id' in locals():
+                s3_client.abort_multipart_upload(
+                    Bucket=bucket_name,
+                    Key=s3_key,
+                    UploadId=upload_id
+                )
+            raise
 
 def process_xml_to_parquet_s3(input_file: str, bucket_name: str, region: Optional[str] = None, chunk_size: int = 1000, download_chunk_size=1024*1024, use_tqdm: str = True) -> None:
     """

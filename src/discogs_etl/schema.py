@@ -70,7 +70,7 @@ release_schema = pa.schema([
         ]))),
         ('formats', pa.list_(pa.struct([
             ('name', pa.string()),
-            ('qty', pa.int32()),
+            ('qty', pa.string()),
             ('descriptions', pa.list_(pa.string()))
         ]))),
         ('genres', pa.list_(pa.string())),
