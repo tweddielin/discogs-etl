@@ -422,8 +422,10 @@ def stream_xml_to_parquet_s3(
                     table = pa.Table.from_pydict(processed_chunk, schema=schema)
                     writer.write_table(table)
                     total_rows += len(chunk)
-                    print(f"\rProgress: chunk {i} | "
-                          f"Rows: {total_rows}", end="")
+                    if i % 100 == 0:
+                        logger.info(f"Processed chunk {i} with {100*len(chunk)} rows. Total rows so far: {total_rows}")
+                    # print(f"\rProgress: chunk {i} | "
+                    #       f"Rows: {total_rows}", end="")
                     # Check if the buffer size is large enough to upload
                     if buffer.tell() > upload_buffer_size:  # 5MB minimum for multipart upload
                         buffer.seek(0)
@@ -482,6 +484,17 @@ def stream_xml_to_parquet_s3(
                     UploadId=upload_id
                 )
             raise
+        
+        finally:
+            # Clean up temporary files if they were created and still exist
+            if temp_downloaded_file and temp_downloaded_file != input_file and os.path.exists(temp_downloaded_file):
+                try:
+                    os.unlink(temp_downloaded_file)
+                    logger.info(f"Deleted temporary file: {temp_downloaded_file}")
+                except Exception as cleanup_error:
+                    logger.error(f"Failed to delete temporary file: {str(cleanup_error)}")
+        
+           
 
 # def process_xml_to_parquet_s3(input_file: str, bucket_name: str, region: Optional[str] = None, chunk_size: int = 1000, download_chunk_size=1024*1024, use_tqdm: str = True) -> None:
 #     """
